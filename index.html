@@ -6870,116 +6870,205 @@
 		["DF", "Brasília"],
 	]
 
-  // ── Update UI with location ────────────────────────────────────
   async function atualizarLocalizacao() {
-    let cidade = getCookie("localCidade");
-    let estado = getCookie("localEstado");
-    if (!cidade || !estado) {
-      ({ city: cidade, region: estado } = await fetchLocation());
-    }
-    document.querySelectorAll("#localCidade").forEach(el => el.textContent = cidade);
-    document.querySelectorAll("#localEstado").forEach(el => el.textContent = estado);
-    const banner = document.getElementById("localCidadeBanner");
-    if (banner) banner.textContent = cidade;
-  }
+			let cidade = getCookie("localCidade");
+			let estado = getCookie("localEstado");
 
-  // ── Modal de seleção de estado/cidade ─────────────────────────
-  async function fluxoLocalizacao(ufInicial, cidadeTemp) {
+			if (!cidade || !estado) {
+				({ city: cidade, region: estado } = await fetchLocation());
+			}
 
-    // ── PASSO 1: Selecionar estado ──────────────────────────────
-    let { value: estadoEscolhido } = await Swal.fire({
-      title: "Procure a loja mais próxima de você!",
-      text: "Escolha seu estado:",
-      input: "select",
-      inputOptions: estados_input,
-      inputPlaceholder: "Escolha seu estado",
-      inputValue: ufInicial,
-      confirmButtonText: "Próximo →",
-      confirmButtonColor: "#16a34a",
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      inputValidator: value => value ? undefined : "Por favor, escolha seu estado."
-    });
+			document.querySelectorAll("#localCidade").forEach(el => el.textContent = cidade);
+			document.querySelectorAll("#localEstado").forEach(el => el.textContent = estado);
+		}
 
-    if (!estadoEscolhido) return;
-    setCookie("localEstado", estadoEscolhido, 365);
+		async function escolherLocalizacao() {
+			await atualizarLocalizacao();
+			if (checkCookie("localCidade") && checkCookie("localEstado")) return;
+			await etapa1();
+		}
 
-    let quais_opt_de_cidade = [];
-    cidades_por_estados.forEach(item => {
-      if (item[0] === estadoEscolhido) quais_opt_de_cidade.push(item[1]);
-    });
+		async function etapa1() {
+			let buscarLocalizacao = await fetchLocation();
+			let estadoNome = buscarLocalizacao.region;
+			let uf = estados[estadoNome] || "";
 
-    // ── PASSO 2: Selecionar cidade (com botão Voltar) ──────────
-    let resultCidade = await Swal.fire({
-      title: "Estamos quase lá...",
-      text: "Agora, selecione sua cidade:",
-      input: "select",
-      inputOptions: quais_opt_de_cidade,
-      inputValue: Math.max(0, quais_opt_de_cidade.indexOf(cidadeTemp)),
-      confirmButtonText: "Procurar loja mais próxima!",
-      confirmButtonColor: "#16a34a",
-      showDenyButton: true,
-      denyButtonText: "← Trocar estado",
-      denyButtonColor: "#6b7280",
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      inputValidator: value => (value !== "" && value !== undefined && value !== null) ? undefined : "Por favor, escolha sua cidade.",
-    });
+			let { value: estadoEscolhido, isDismissed } = await Swal.fire({
+				title: "Procure a loja mais próxima de você!",
+				text: "Escolha seu estado:",
+				input: "select",
+				inputOptions: estados_input,
+				inputPlaceholder: "— Selecione seu estado —",
+				inputValue: uf,
+				confirmButtonText: "Próximo →",
+				confirmButtonColor: "#16a34a",
+				allowOutsideClick: false,
+				allowEscapeKey: false,
+				inputValidator: v => v ? undefined : "Por favor, escolha seu estado."
+			});
+			if (!estadoEscolhido) return;
+			await etapa2(estadoEscolhido, buscarLocalizacao.city);
+		}
 
-    // Clicou em "Trocar estado" → volta pro passo 1
-    if (resultCidade.isDenied) {
-      return fluxoLocalizacao(estadoEscolhido, cidadeTemp);
-    }
+		async function etapa2(estadoEscolhido, cidadeTemp) {
+			const opcoesCidades = [];
+			cidades_por_estados.forEach(item => {
+				if (item[0] === estadoEscolhido) opcoesCidades.push(item[1]);
+			});
 
-    if (resultCidade.value === undefined || resultCidade.value === false) return;
+			let { value: idx, isDismissed } = await Swal.fire({
+				title: "Estamos quase lá...",
+				text: "Agora, selecione sua cidade:",
+				input: "select",
+				inputOptions: opcoesCidades,
+				inputValue: Math.max(0, opcoesCidades.indexOf(cidadeTemp)),
+				confirmButtonText: "Procurar loja mais próxima!",
+				confirmButtonColor: "#16a34a",
+				showCancelButton: true,
+				cancelButtonText: "← Trocar estado",
+				cancelButtonColor: "#6b7280",
+				allowOutsideClick: false,
+				allowEscapeKey: false,
+				inputValidator: v => (v !== "" && v !== undefined) ? undefined : "Por favor, escolha sua cidade."
+			});
 
-    let cidadeEscolhida = quais_opt_de_cidade[resultCidade.value];
-    setCookie("localCidade", cidadeEscolhida, 365);
+			if (isDismissed) { await etapa1(); return; }
+			const cidade = opcoesCidades[idx] || opcoesCidades[0];
+			await etapaLoading(estadoEscolhido, cidade);
+		}
 
-    // ── PASSO 3: Loading ────────────────────────────────────────
-    await Swal.fire({
-      title: "Procurando a loja mais próxima...",
-      html: `Procurando a loja mais próxima de você em <b>${cidadeEscolhida}</b>...`,
-      timer: 5000,
-      timerProgressBar: true,
-      allowOutsideClick: false,
-      didOpen: () => Swal.showLoading(),
-    });
+		async function etapaLoading(estado, cidade) {
+			await Swal.fire({
+				title: "Procurando a loja mais próxima...",
+				html: `Procurando a loja mais perto de você em <b>${cidade}</b>...`,
+				timer: 2000,
+				timerProgressBar: false,
+				allowOutsideClick: false,
+				allowEscapeKey: false,
+				showConfirmButton: false,
+				didOpen: () => Swal.showLoading()
+			});
+			await etapa3(estado, cidade);
+		}
 
-    // ── PASSO 4: Sucesso (com opção de corrigir cidade) ─────────
-    let resultFinal = await Swal.fire({
-      html: `A loja mais próxima fica a <b>1,6km</b> de você! Seu pedido chegará entre 30 a 50 minutos.`,
-      icon: "success",
-      confirmButtonText: "Ver cardápio de ofertas!",
-      confirmButtonColor: "#16a34a",
-      showDenyButton: true,
-      denyButtonText: "Cidade errada? Corrigir",
-      denyButtonColor: "#9ca3af",
-      allowOutsideClick: false,
-    });
+		async function etapa3(estado, cidade) {
+		  const progressoHTML = `
+		    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+		      <div style="display:flex;align-items:center;gap:6px;flex:1;">
+		        <div style="width:28px;height:28px;border-radius:50%;background:#16a34a;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:14px;">✓</div>
+		        <div style="flex:1;height:3px;background:#16a34a;"></div>
+		      </div>
+		    </div>
+		    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:12px;">
+		      <span style="color:#16a34a;font-weight:bold;">📍 Endereço de Entrega</span>
+		    </div>`;
 
-    if (resultFinal.isDenied) {
-      // Limpa cookies e refaz o fluxo desde a cidade
-      document.cookie = "localCidade=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-      document.cookie = "localEstado=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-      return fluxoLocalizacao("", cidadeTemp);
-    }
+		  const formHTML = progressoHTML + `
+		    <p style="background:#f0fdf4;border-radius:8px;padding:10px;font-size:13px;margin-bottom:14px;">A loja mais próxima fica a <b>1,6km</b> de você! Seu pedido chegará entre <b>30 a 50 minutos</b>.</p>
+		    <div style="text-align:left;">
+		      <b style="font-size:15px;">Endereço de Entrega</b>
+		      <div style="margin-top:12px;">
+		        <label style="font-size:13px;font-weight:600;">CEP <span style="color:red">*</span></label>
+		        <input id="swal-cep" type="text" placeholder="00000-000" maxlength="9" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;">
+		      </div>
+		      <div style="margin-top:10px;">
+		        <label style="font-size:13px;font-weight:600;">Rua / Avenida <span style="color:red">*</span></label>
+		        <input id="swal-rua" type="text" placeholder="Nome da sua rua..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;">
+		      </div>
+		      <div style="margin-top:10px;display:flex;gap:8px;">
+		        <div style="flex:1;">
+		          <label style="font-size:13px;font-weight:600;">Número <span style="color:red">*</span></label>
+		          <input id="swal-numero" type="text" placeholder="Nº" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;">
+		        </div>
+		        <div style="flex:1;">
+		          <label style="font-size:13px;font-weight:600;">Complemento <span style="color:#6b7280;font-weight:400;">(Opcional)</span></label>
+		          <input id="swal-comp" type="text" placeholder="Apto, bloco..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;">
+		        </div>
+		      </div>
+		      <div style="margin-top:10px;">
+		        <label style="font-size:13px;font-weight:600;">Bairro <span style="color:red">*</span></label>
+		        <input id="swal-bairro" type="text" placeholder="Preenchido automaticamente pelo CEP..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;">
+		      </div>
+		      <div style="margin-top:10px;display:flex;gap:8px;">
+		        <div style="flex:1;">
+		          <label style="font-size:13px;font-weight:600;">Cidade</label>
+		          <input id="swal-cidade" type="text" value="${cidade}" readonly style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;background:#f9fafb;">
+		        </div>
+		        <div style="flex:1;">
+		          <label style="font-size:13px;font-weight:600;">Estado</label>
+		          <input id="swal-estado" type="text" value="${estado}" readonly style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-top:4px;box-sizing:border-box;font-size:14px;background:#f9fafb;">
+		        </div>
+		      </div>
+		      <div id="swal-erro3" style="color:red;font-size:13px;margin-top:8px;display:none;"></div>
+		    </div>`;
 
-    atualizarLocalizacao();
-  }
+		  let voltou = false;
+		  await Swal.fire({
+		    html: formHTML,
+		    showConfirmButton: true,
+		    confirmButtonText: "Avançar →",
+		    confirmButtonColor: "#16a34a",
+		    showCancelButton: true,
+		    cancelButtonText: "Cidade errada? Corrigir",
+		    cancelButtonColor: "#6b7280",
+		    allowOutsideClick: false,
+		    allowEscapeKey: false,
+		    didOpen: () => {
+		      const cepInput = document.getElementById("swal-cep");
+		      cepInput.addEventListener("input", () => {
+		        let v = cepInput.value.replace(/\D/g, "");
+		        if (v.length > 5) v = v.slice(0,5) + "-" + v.slice(5,8);
+		        cepInput.value = v;
+		      });
+		      cepInput.addEventListener("blur", async () => {
+		        const cep = cepInput.value.replace(/\D/g, "");
+		        if (cep.length === 8) {
+		          try {
+		            const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+		            const d = await r.json();
+		            if (!d.erro) {
+		              if (d.logradouro) document.getElementById("swal-rua").value = d.logradouro;
+		              if (d.bairro) document.getElementById("swal-bairro").value = d.bairro;
+		            }
+		          } catch(e) {}
+		        }
+		      });
+		      document.querySelector(".swal2-confirm").addEventListener("click", (e) => {
+		        const cep = document.getElementById("swal-cep").value.trim();
+		        const rua = document.getElementById("swal-rua").value.trim();
+		        const numero = document.getElementById("swal-numero").value.trim();
+		        const bairro = document.getElementById("swal-bairro").value.trim();
+		        const erro = document.getElementById("swal-erro3");
+		        if (!cep || !rua || !numero || !bairro) {
+		          erro.textContent = "Por favor, preencha todos os campos obrigatórios.";
+		          erro.style.display = "block";
+		          e.stopPropagation();
+		          return false;
+		        }
+		        erro.style.display = "none";
+		      }, true);
+		    },
+		    preConfirm: () => {
+		      const cep = document.getElementById("swal-cep").value.trim();
+		      const rua = document.getElementById("swal-rua").value.trim();
+		      const numero = document.getElementById("swal-numero").value.trim();
+		      const bairro = document.getElementById("swal-bairro").value.trim();
+		      if (!cep || !rua || !numero || !bairro) return false;
+		      return { cep, rua, numero, complemento: document.getElementById("swal-comp").value.trim(), bairro };
+		    }
+		  }).then(async (result) => {
+		    if (result.isDismissed) { voltou = true; }
+		    else if (result.value) {
+		      setCookie("localEstado", estado, 365);
+		      setCookie("localCidade", cidade, 365);
+		      setCookie("enderecoCompleto", JSON.stringify(result.value), 365);
+		      await atualizarLocalizacao();
+		    }
+		  });
+		  if (voltou) await etapa1();
+		}
 
-  async function escolherLocalizacao() {
-    await atualizarLocalizacao();
-    if (checkCookie("localCidade") && checkCookie("localEstado")) return;
-
-    let buscarLocalizacao = await fetchLocation();
-    let uf = estados[buscarLocalizacao.region] || "";
-    let cidadeTemp = buscarLocalizacao.city;
-
-    await fluxoLocalizacao(uf, cidadeTemp);
-  }
-
-  escolherLocalizacao();
+		escolherLocalizacao();
 </script>
 
 </body>
